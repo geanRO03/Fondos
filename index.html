@@ -137,6 +137,14 @@ var state = {
   saveError: false,
   reportMes: new Date().getMonth(),
   reportAnio: new Date().getFullYear(),
+  historialPeriodo: "todo",
+  historialAnio: new Date().getFullYear(),
+  historialMes: new Date().getMonth(),
+  historialDia: todayISO(),
+  historialOrden: "fecha_desc",
+  reportesOrden: "fecha_desc",
+  editandoMovId: null,
+  confirmFinalizarId: null,
   deteccion: null
 };
 var mem = { categoriaSel: "Otros" }; // transient (not re-rendered per keystroke)
@@ -169,7 +177,7 @@ function showToast(msg){
 
 // ---------- actions ----------
 function addFondo(nombre, monto, moneda, fecha, diezmoPct){
-  var nuevo = { id: uid(), nombre: nombre, moneda: moneda, montoInicial: monto, fecha: fecha, movimientos: [] };
+  var nuevo = { id: uid(), nombre: nombre, moneda: moneda, montoInicial: monto, fecha: fecha, movimientos: [], cerradoManual: false };
   if(diezmoPct > 0){
     var montoDiezmo = Math.round(monto * (diezmoPct/100) * 100) / 100;
     if(montoDiezmo > 0){
@@ -198,6 +206,19 @@ function addMovimiento(fondoId, desc, monto, monedaGasto, tipoCambio, montoConve
   render();
   showToast("Gasto anotado");
 }
+function editarMovimiento(fondoId, movId, desc, monto, monedaGasto, tipoCambio, montoConvertido, categoria, fecha){
+  var f = state.fondos.find(function(x){ return x.id === fondoId; });
+  if(!f) return;
+  var m = f.movimientos.find(function(x){ return x.id === movId; });
+  if(!m) return;
+  m.desc = desc; m.monto = monto; m.moneda = monedaGasto; m.tipoCambio = tipoCambio;
+  m.montoConvertido = montoConvertido; m.categoria = categoria; m.fecha = fecha;
+  save();
+  state.modal = null;
+  state.editandoMovId = null;
+  render();
+  showToast("Gasto actualizado");
+}
 function deleteMovimiento(fondoId, movId){
   var f = state.fondos.find(function(x){ return x.id === fondoId; });
   if(!f) return;
@@ -210,6 +231,23 @@ function deleteFondo(fondoId){
   save();
   state.modal = null; state.confirmDeleteId = null; state.openFondoId = null;
   render();
+}
+function finalizarProyecto(fondoId){
+  var f = state.fondos.find(function(x){ return x.id === fondoId; });
+  if(!f) return;
+  f.cerradoManual = true;
+  save();
+  state.modal = null;
+  render();
+  showToast("Proyecto finalizado");
+}
+function reabrirProyecto(fondoId){
+  var f = state.fondos.find(function(x){ return x.id === fondoId; });
+  if(!f) return;
+  f.cerradoManual = false;
+  save();
+  render();
+  showToast("Proyecto reabierto");
 }
 
 // ---------- tabular schema shared by CSV / Excel export+import ----------
@@ -462,7 +500,7 @@ function renderHeader(){
 }
 
 function renderInicio(){
-  var activos = state.fondos.filter(function(f){ return saldoDe(f) > 0.009; });
+  var activos = state.fondos.filter(function(f){ return !f.cerradoManual && saldoDe(f) > 0.009; });
   var html = '<div style="padding:0 20px;" class="fade-slide">';
   if(state.saveError){
     html += '<div class="pop-in" style="display:flex;gap:8px;align-items:center;background:#F6E9E4;border:1px solid rgba(163,68,50,.35);border-radius:8px;padding:10px 12px;margin-bottom:16px;font-size:13px;color:var(--rust);">' + icon("alert",16) + ' No se pudo guardar. El teléfono puede tener poco espacio.</div>';
@@ -501,7 +539,7 @@ function renderDetail(f){
   html += '<div style="padding:calc(20px + env(safe-area-inset-top,0px)) 20px 0;">';
   html += '<button data-action="cerrar-fondo-detalle" class="press" style="background:none;border:none;display:flex;align-items:center;gap:4px;color:var(--muted);font-size:14px;padding:8px 0;margin:-8px 0 14px -4px;">' + icon("chevronLeft",16) + ' Todos los fondos</button>';
   html += '<div class="display" style="font-size:24px;font-weight:600;color:var(--forest-dk);margin-bottom:4px;">' + esc(f.nombre) + '</div>';
-  html += '<div style="font-size:13px;color:var(--muted);margin-bottom:18px;">Recibido el ' + fmtFecha(f.fecha) + '</div>';
+  html += '<div style="font-size:13px;color:var(--muted);margin-bottom:18px;">Recibido el ' + fmtFecha(f.fecha) + (f.cerradoManual ? ' \u00b7 <span style="color:var(--gold);">finalizado manualmente</span>' : '') + '</div>';
 
   html += '<div class="pop-in" style="background:var(--forest-dk);border-radius:12px;padding:18px 20px;color:var(--cream);margin-bottom:14px;">';
   html += '<div style="font-size:11px;letter-spacing:1.5px;text-transform:uppercase;opacity:.65;margin-bottom:4px;">Saldo disponible</div>';
@@ -519,7 +557,7 @@ function renderDetail(f){
     f.movimientos.forEach(function(m, i){
       var monedaGasto = m.moneda || f.moneda;
       var convertido = monedaGasto !== f.moneda;
-      html += '<div class="row-in" style="animation-delay:' + (Math.min(i,8)*35) + 'ms;display:flex;align-items:center;gap:10px;padding:9px 0;">' +
+      html += '<div class="row-in press" data-action="edit-mov" data-fondo="' + f.id + '" data-mov="' + m.id + '" style="animation-delay:' + (Math.min(i,8)*35) + 'ms;display:flex;align-items:center;gap:10px;padding:9px 0;cursor:pointer;">' +
         '<div style="width:8px;height:8px;border-radius:50%;background:' + (CAT_COLOR[m.categoria]||"#8A8270") + ';flex-shrink:0;"></div>' +
         '<div style="flex:1;min-width:0;"><div style="font-size:14.5px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(m.desc) + '</div>' +
         '<div style="font-size:11.5px;color:var(--muted);">' + esc(m.categoria) + ' · ' + fmtFecha(m.fecha) + '</div></div>' +
@@ -533,14 +571,21 @@ function renderDetail(f){
   }
   html += '</div>';
 
-  html += '<div style="padding:10px 20px 0;"><button data-action="confirm-delete-fondo" data-id="' + f.id + '" class="press" style="background:none;border:none;color:var(--muted);font-size:12.5px;display:flex;align-items:center;gap:5px;padding:0;">' + icon("trash",13) + ' Eliminar este fondo</button></div>';
+  html += '<div style="padding:10px 20px 0;display:flex;flex-direction:column;align-items:flex-start;gap:12px;">';
+  if(f.cerradoManual){
+    html += '<button data-action="reabrir-proyecto" data-id="' + f.id + '" class="press" style="background:none;border:none;color:var(--forest);font-size:12.5px;display:flex;align-items:center;gap:5px;padding:0;font-weight:600;">' + icon("repeat",13) + ' Reabrir proyecto</button>';
+  } else if(saldo > 0.009){
+    html += '<button data-action="confirm-finalizar" data-id="' + f.id + '" class="press" style="background:none;border:none;color:var(--muted);font-size:12.5px;display:flex;align-items:center;gap:5px;padding:0;">' + icon("check",13) + ' Finalizar proyecto (aunque quede saldo)</button>';
+  }
+  html += '<button data-action="confirm-delete-fondo" data-id="' + f.id + '" class="press" style="background:none;border:none;color:var(--muted);font-size:12.5px;display:flex;align-items:center;gap:5px;padding:0;">' + icon("trash",13) + ' Eliminar este fondo</button>';
+  html += '</div>';
   html += '</div>';
   return html;
 }
 
 function renderReportes(){
   var mes = state.reportMes, anio = state.reportAnio;
-  var porMoneda = { USD: { ingresos:0, gastos:0, diezmo:0, categorias:{} }, "C$": { ingresos:0, gastos:0, diezmo:0, categorias:{} } };
+  var porMoneda = { USD: { ingresos:0, gastos:0, diezmo:0 }, "C$": { ingresos:0, gastos:0, diezmo:0 } };
   state.fondos.forEach(function(f){
     var parts = f.fecha.split("-"); var fy = parseInt(parts[0],10), fm = parseInt(parts[1],10);
     if(fy === anio && fm-1 === mes) porMoneda[f.moneda].ingresos += f.montoInicial;
@@ -550,11 +595,11 @@ function renderReportes(){
         var valor = montoConvertidoDe(m, f.moneda);
         porMoneda[f.moneda].gastos += valor;
         if(m.categoria === "Diezmo") porMoneda[f.moneda].diezmo += valor;
-        porMoneda[f.moneda].categorias[m.categoria] = (porMoneda[f.moneda].categorias[m.categoria] || 0) + valor;
       }
     });
   });
 
+  var flatMes = reportesMovimientosFlat(mes, anio);
   var vacio = porMoneda.USD.ingresos===0 && porMoneda.USD.gastos===0 && porMoneda["C$"].ingresos===0 && porMoneda["C$"].gastos===0;
 
   var html = '<div style="padding:0 20px;" class="fade-slide">';
@@ -567,38 +612,170 @@ function renderReportes(){
   ["USD","C$"].forEach(function(moneda){
     var d = porMoneda[moneda];
     if(d.ingresos===0 && d.gastos===0) return;
-    html += '<div class="row-in" style="margin-bottom:28px;">';
+    html += '<div style="margin-bottom:16px;">';
     html += '<div class="mono" style="font-size:10.5px;letter-spacing:2px;color:var(--muted);text-transform:uppercase;margin-bottom:8px;">' + (moneda==="USD"?"D\u00f3lares":"C\u00f3rdobas") + '</div>';
     html += filaResumen("Ingresos", fmtMoney(d.ingresos, moneda), "var(--forest)");
     html += filaResumen("Gastos", fmtMoney(d.gastos, moneda), "var(--rust)");
     html += filaResumen("Diezmo", fmtMoney(d.diezmo, moneda), "var(--gold)");
-    var cats = Object.keys(d.categorias);
-    if(cats.length > 0){
-      html += '<div style="margin-top:16px;">';
-      var max = Math.max.apply(null, cats.map(function(c){ return d.categorias[c]; }));
-      cats.sort(function(a,b){ return d.categorias[b]-d.categorias[a]; }).forEach(function(cat, i){
-        var val = d.categorias[cat];
-        html += '<div style="margin-bottom:10px;"><div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:3px;"><span style="color:var(--ink);">' + esc(cat) + '</span><span class="mono" style="color:var(--muted);">' + fmtMoney(val, moneda) + '</span></div>';
-        html += '<div style="height:5px;background:var(--line);border-radius:3px;overflow:hidden;"><div class="bar-fill" style="height:100%;width:' + ((val/max)*100) + '%;background:' + (CAT_COLOR[cat]||"#8A8270") + ';border-radius:3px;transition-delay:' + (i*40) + 'ms;"></div></div></div>';
-      });
-      html += '</div>';
-    }
     html += '</div>';
   });
 
-  if(vacio){
+  if(flatMes.length > 0){
+    html += '<div style="margin-bottom:18px;"><select id="rep-orden-sel" style="' + inputStyle + '">' +
+      ORDEN_OPCIONES.map(function(o){ return '<option value="' + o[0] + '"' + (o[0]===state.reportesOrden?" selected":"") + '>Ordenar: ' + o[1] + '</option>'; }).join("") +
+    '</select></div>';
+    var ordenadoMes = ordenarLista(flatMes, state.reportesOrden);
+    var agrupadoMes = agruparPorCategoria(ordenadoMes);
+    html += renderBloquesCategoria(agrupadoMes);
+  } else if(vacio){
     html += '<div class="pop-in" style="text-align:center;padding:40px 10px;color:var(--muted);">' + icon("pie",28) + '<div style="font-size:14px;margin-top:10px;">No hay movimientos este mes.</div></div>';
   }
   html += '</div>';
   return html;
 }
+function reportesMovimientosFlat(mes, anio){
+  var lista = [];
+  state.fondos.forEach(function(f){
+    f.movimientos.forEach(function(m){
+      var mp = m.fecha.split("-"); var my = parseInt(mp[0],10), mm = parseInt(mp[1],10);
+      if(my === anio && mm-1 === mes){
+        lista.push({
+          fondoId: f.id, fondoNombre: f.nombre, categoria: m.categoria || "Otros",
+          desc: m.desc, monto: montoConvertidoDe(m, f.moneda), moneda: f.moneda, fecha: m.fecha
+        });
+      }
+    });
+  });
+  return lista;
+}
 function filaResumen(label, value, color){
   return '<div style="display:flex;justify-content:space-between;align-items:baseline;padding:8px 0;border-bottom:1px solid var(--line);"><span style="font-size:13.5px;color:var(--ink);">' + label + '</span><span class="mono" style="font-size:14.5px;font-weight:600;color:' + color + ';">' + value + '</span></div>';
 }
 
+var ORDEN_OPCIONES = [
+  ["fecha_desc", "Fecha \u2014 recientes primero"],
+  ["fecha_asc", "Fecha \u2014 antiguos primero"],
+  ["monto_desc", "Monto \u2014 mayor a menor"],
+  ["monto_asc", "Monto \u2014 menor a mayor"],
+  ["nombre_asc", "Nombre \u2014 A a Z"],
+  ["nombre_desc", "Nombre \u2014 Z a A"]
+];
+
+function historialMovimientosFlat(){
+  var cerrados = state.fondos.filter(function(f){ return f.cerradoManual || saldoDe(f) <= 0.009; });
+  var lista = [];
+  cerrados.forEach(function(f){
+    f.movimientos.forEach(function(m){
+      lista.push({
+        fondoId: f.id, fondoNombre: f.nombre, categoria: m.categoria || "Otros",
+        desc: m.desc, monto: montoConvertidoDe(m, f.moneda), moneda: f.moneda, fecha: m.fecha
+      });
+    });
+  });
+  return lista;
+}
+function fechaMasRecienteHistorial(){
+  var lista = historialMovimientosFlat();
+  if(lista.length === 0) return todayISO();
+  return lista.reduce(function(max, r){ return r.fecha > max ? r.fecha : max; }, lista[0].fecha);
+}
+function aniosDisponiblesHistorial(){
+  var set = {};
+  historialMovimientosFlat().forEach(function(r){ set[r.fecha.slice(0,4)] = true; });
+  var arr = Object.keys(set).map(Number).sort(function(a,b){ return b-a; });
+  return arr.length ? arr : [new Date().getFullYear()];
+}
+function filtrarHistorialPorPeriodo(lista){
+  if(state.historialPeriodo === "todo") return lista;
+  return lista.filter(function(r){
+    if(state.historialPeriodo === "anio") return parseInt(r.fecha.slice(0,4),10) === state.historialAnio;
+    if(state.historialPeriodo === "mes") return parseInt(r.fecha.slice(0,4),10) === state.historialAnio && (parseInt(r.fecha.slice(5,7),10)-1) === state.historialMes;
+    if(state.historialPeriodo === "dia") return r.fecha === state.historialDia;
+    return true;
+  });
+}
+function ordenarLista(lista, orden){
+  var arr = lista.slice();
+  switch(orden){
+    case "fecha_asc": arr.sort(function(a,b){ return a.fecha < b.fecha ? -1 : (a.fecha > b.fecha ? 1 : 0); }); break;
+    case "monto_desc": arr.sort(function(a,b){ return b.monto - a.monto; }); break;
+    case "monto_asc": arr.sort(function(a,b){ return a.monto - b.monto; }); break;
+    case "nombre_asc": arr.sort(function(a,b){ return a.desc.localeCompare(b.desc); }); break;
+    case "nombre_desc": arr.sort(function(a,b){ return b.desc.localeCompare(a.desc); }); break;
+    default: arr.sort(function(a,b){ return a.fecha > b.fecha ? -1 : (a.fecha < b.fecha ? 1 : 0); });
+  }
+  return arr;
+}
+function ordenarHistorial(lista){ return ordenarLista(lista, state.historialOrden); }
+function agruparPorCategoria(lista){
+  var grupos = {}, orden = [];
+  lista.forEach(function(r){
+    if(!grupos[r.categoria]){ grupos[r.categoria] = { items: [], subtotal: { USD: 0, "C$": 0 } }; orden.push(r.categoria); }
+    grupos[r.categoria].items.push(r);
+    grupos[r.categoria].subtotal[r.moneda] += r.monto;
+  });
+  orden.sort(function(a,b){
+    var ta = grupos[a].subtotal.USD + grupos[a].subtotal["C$"];
+    var tb = grupos[b].subtotal.USD + grupos[b].subtotal["C$"];
+    return tb - ta;
+  });
+  return { grupos: grupos, orden: orden };
+}
+function renderBloquesCategoria(agrupado){
+  var html = "";
+  agrupado.orden.forEach(function(cat, gi){
+    var grupo = agrupado.grupos[cat];
+    html += '<div class="row-in" style="margin-bottom:22px;animation-delay:' + (Math.min(gi,8)*30) + 'ms;">';
+    html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">';
+    html += '<div style="display:flex;align-items:center;gap:7px;"><span style="width:8px;height:8px;border-radius:50%;background:' + (CAT_COLOR[cat]||"#8A8270") + ';flex-shrink:0;"></span><span class="mono" style="font-size:11.5px;letter-spacing:1.5px;color:var(--ink);text-transform:uppercase;font-weight:600;">' + esc(cat) + '</span></div>';
+    var subtotalTxt = [];
+    ["USD","C$"].forEach(function(m){ if(grupo.subtotal[m] > 0) subtotalTxt.push(fmtMoney(grupo.subtotal[m], m)); });
+    html += '<span class="mono" style="font-size:12px;color:var(--muted);">' + subtotalTxt.join(" + ") + '</span>';
+    html += '</div>';
+    grupo.items.forEach(function(r){
+      html += '<button data-action="open-fondo" data-id="' + r.fondoId + '" class="press" style="width:100%;text-align:left;background:none;border:none;border-bottom:1px solid var(--line);padding:10px 0;display:flex;align-items:baseline;gap:10px;">';
+      html += '<span style="flex:1;min-width:0;"><span style="display:block;font-size:14px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(r.desc) + '</span><span style="display:block;font-size:11px;color:var(--muted);">' + esc(r.fondoNombre) + ' \u00b7 ' + fmtFecha(r.fecha) + '</span></span>';
+      html += '<span class="mono" style="font-size:13.5px;color:var(--rust);white-space:nowrap;">\u2212' + fmtMoney(r.monto, r.moneda) + '</span>';
+      html += '</button>';
+    });
+    html += '</div>';
+  });
+  return html;
+}
+
+function renderHistorialFiltros(){
+  var periodos = [["todo","Todo"],["anio","A\u00f1o"],["mes","Mes"],["dia","D\u00eda"]];
+  var html = '<div style="display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;">';
+  periodos.forEach(function(p){
+    var active = state.historialPeriodo === p[0];
+    html += '<button data-action="hist-periodo" data-periodo="' + p[0] + '" class="chip press" style="border:1px solid ' + (active?"var(--forest)":"var(--line)") + ';background:' + (active?"var(--forest)":"transparent") + ';color:' + (active?"var(--cream)":"var(--muted)") + ';border-radius:20px;padding:6px 13px;font-size:12.5px;font-weight:' + (active?600:400) + ';">' + p[1] + '</button>';
+  });
+  html += '</div>';
+
+  if(state.historialPeriodo === "anio"){
+    var anios = aniosDisponiblesHistorial();
+    html += '<div style="margin-bottom:12px;"><select id="hist-anio-sel" style="' + inputStyle + '">' + anios.map(function(a){ return '<option value="' + a + '"' + (a===state.historialAnio?" selected":"") + '>' + a + '</option>'; }).join("") + '</select></div>';
+  }
+  if(state.historialPeriodo === "mes"){
+    html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:4px 6px;">';
+    html += '<button data-action="hist-mes-prev" class="press" style="background:none;border:none;padding:8px;color:var(--muted);">' + icon("chevronLeft",16) + '</button>';
+    html += '<div class="mono" style="font-size:13px;color:var(--ink);">' + MESES[state.historialMes] + ' ' + state.historialAnio + '</div>';
+    html += '<button data-action="hist-mes-next" class="press" style="background:none;border:none;padding:8px;color:var(--muted);">' + icon("chevronRight",16) + '</button>';
+    html += '</div>';
+  }
+  if(state.historialPeriodo === "dia"){
+    html += '<div style="margin-bottom:12px;"><input type="date" id="hist-dia-input" style="' + inputStyle + '" value="' + state.historialDia + '"></div>';
+  }
+
+  html += '<div style="margin-bottom:18px;"><select id="hist-orden-sel" style="' + inputStyle + '">' +
+    ORDEN_OPCIONES.map(function(o){ return '<option value="' + o[0] + '"' + (o[0]===state.historialOrden?" selected":"") + '>Ordenar: ' + o[1] + '</option>'; }).join("") +
+  '</select></div>';
+
+  return html;
+}
+
 function renderHistorial(){
-  var cerrados = state.fondos.filter(function(f){ return saldoDe(f) <= 0.009; })
-    .slice().sort(function(a,b){ return a.fecha < b.fecha ? 1 : (a.fecha > b.fecha ? -1 : 0); });
+  var cerrados = state.fondos.filter(function(f){ return f.cerradoManual || saldoDe(f) <= 0.009; });
   var html = '<div style="padding:0 20px;" class="fade-slide">';
   if(cerrados.length === 0){
     html += '<div class="pop-in" style="text-align:center;padding:40px 10px;color:var(--muted);">' + icon("history",28) + '<div style="font-size:14px;margin-top:10px;">Los proyectos que termines aparecerán aquí, con el detalle completo de cada gasto.</div></div>';
@@ -606,78 +783,33 @@ function renderHistorial(){
     return html;
   }
 
-  var resumen = { USD: { n: 0, total: 0, movs: 0, categorias: {}, diezmo: 0 }, "C$": { n: 0, total: 0, movs: 0, categorias: {}, diezmo: 0 } };
-  cerrados.forEach(function(f){
-    resumen[f.moneda].n++;
-    resumen[f.moneda].total += f.montoInicial;
-    resumen[f.moneda].movs += f.movimientos.length;
-    f.movimientos.forEach(function(m){
-      var valor = montoConvertidoDe(m, f.moneda);
-      resumen[f.moneda].categorias[m.categoria] = (resumen[f.moneda].categorias[m.categoria] || 0) + valor;
-      if(m.categoria === "Diezmo") resumen[f.moneda].diezmo += valor;
-    });
-  });
+  html += renderHistorialFiltros();
 
-  html += '<div style="margin-bottom:24px;">';
-  html += '<div class="mono" style="font-size:10.5px;letter-spacing:2px;color:var(--muted);text-transform:uppercase;margin-bottom:10px;">Resumen hist\u00f3rico</div>';
+  var flat = historialMovimientosFlat();
+  var filtrado = filtrarHistorialPorPeriodo(flat);
+  var ordenado = ordenarHistorial(filtrado);
+  var agrupado = agruparPorCategoria(ordenado);
+
+  var totales = { USD: 0, "C$": 0 }, proyectos = {};
+  filtrado.forEach(function(r){ totales[r.moneda] += r.monto; proyectos[r.fondoId] = true; });
+  var nProyectos = Object.keys(proyectos).length;
+
+  html += '<div style="margin-bottom:20px;">';
+  if(filtrado.length > 0){
+    html += '<div style="font-size:12.5px;color:var(--muted);margin-bottom:8px;">' + filtrado.length + ' gasto' + (filtrado.length===1?"":"s") + ' \u00b7 ' + nProyectos + ' proyecto' + (nProyectos===1?"":"s") + '</div>';
+  }
   ["USD","C$"].forEach(function(m){
-    if(resumen[m].n === 0) return;
-    html += '<div style="display:flex;justify-content:space-between;align-items:baseline;padding:8px 0;border-bottom:1px solid var(--line);">' +
-      '<span style="font-size:13.5px;color:var(--ink);">' + resumen[m].n + ' proyecto' + (resumen[m].n===1?"":"s") + ' terminado' + (resumen[m].n===1?"":"s") + ' \u00b7 ' + resumen[m].movs + ' gasto' + (resumen[m].movs===1?"":"s") + '</span>' +
-      '<span class="mono" style="font-size:15px;font-weight:600;color:var(--forest-dk);">' + fmtMoney(resumen[m].total, m) + '</span>' +
-    '</div>';
-    if(resumen[m].diezmo > 0){
-      html += '<div style="display:flex;justify-content:space-between;align-items:baseline;padding:8px 0;border-bottom:1px solid var(--line);">' +
-        '<span style="font-size:13px;color:var(--muted);">Diezmo apartado en total</span>' +
-        '<span class="mono" style="font-size:13.5px;color:var(--gold);">' + fmtMoney(resumen[m].diezmo, m) + '</span>' +
-      '</div>';
-    }
+    if(totales[m] === 0) return;
+    html += filaResumen("Total en " + (m==="USD"?"d\u00f3lares":"c\u00f3rdobas"), fmtMoney(totales[m], m), "var(--forest-dk)");
   });
   html += '</div>';
 
-  ["USD","C$"].forEach(function(m){
-    var cats = Object.keys(resumen[m].categorias);
-    if(cats.length === 0) return;
-    var max = Math.max.apply(null, cats.map(function(c){ return resumen[m].categorias[c]; }));
-    html += '<div style="margin-bottom:24px;">';
-    html += '<div class="mono" style="font-size:10.5px;letter-spacing:2px;color:var(--muted);text-transform:uppercase;margin-bottom:10px;">En qu\u00e9 se fue \u2014 ' + (m==="USD"?"d\u00f3lares":"c\u00f3rdobas") + '</div>';
-    cats.sort(function(a,b){ return resumen[m].categorias[b]-resumen[m].categorias[a]; }).forEach(function(cat, i){
-      var val = resumen[m].categorias[cat];
-      html += '<div style="margin-bottom:9px;"><div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:3px;"><span style="color:var(--ink);">' + esc(cat) + '</span><span class="mono" style="color:var(--muted);">' + fmtMoney(val, m) + '</span></div>';
-      html += '<div style="height:5px;background:var(--line);border-radius:3px;overflow:hidden;"><div class="bar-fill" style="height:100%;width:' + ((val/max)*100) + '%;background:' + (CAT_COLOR[cat]||"#8A8270") + ';border-radius:3px;transition-delay:' + (i*40) + 'ms;"></div></div></div>';
-    });
-    html += '</div>';
-  });
+  if(filtrado.length === 0){
+    html += '<div class="pop-in" style="text-align:center;padding:30px 10px;color:var(--muted);font-size:14px;">No hay gastos registrados en este periodo.</div>';
+  } else {
+    html += renderBloquesCategoria(agrupado);
+  }
 
-  html += '<div class="mono" style="font-size:10.5px;letter-spacing:2px;color:var(--muted);text-transform:uppercase;margin-bottom:4px;">Detalle completo, del m\u00e1s reciente al m\u00e1s antiguo</div>';
-  cerrados.forEach(function(f, i){
-    html += '<div class="row-in" style="animation-delay:' + (Math.min(i,10)*35) + 'ms;margin-bottom:6px;">';
-    html += '<button data-action="open-fondo" data-id="' + f.id + '" class="press" style="width:100%;text-align:left;background:none;border:none;border-top:1px solid var(--line);padding:14px 0 4px;display:flex;align-items:baseline;gap:12px;">';
-    html += '<span class="mono" style="font-size:11px;color:var(--muted);width:20px;flex-shrink:0;">' + String(i+1).padStart(2,"0") + '</span>';
-    html += '<span style="flex:1;min-width:0;">' +
-      '<span style="display:block;font-size:15px;color:var(--forest-dk);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(f.nombre) + '</span>' +
-      '<span style="display:block;font-size:11.5px;color:var(--muted);">Recibido ' + fmtFecha(f.fecha) + '</span>' +
-    '</span>';
-    html += '<span class="mono" style="font-size:14.5px;color:var(--forest-dk);font-weight:600;white-space:nowrap;">' + fmtMoney(f.montoInicial, f.moneda) + '</span>';
-    html += '</button>';
-
-    if(f.movimientos.length === 0){
-      html += '<div style="padding:6px 0 10px 32px;font-size:12.5px;color:var(--muted);">Sin gastos registrados.</div>';
-    } else {
-      var ordenMovs = f.movimientos.slice().sort(function(a,b){ return a.fecha < b.fecha ? -1 : (a.fecha > b.fecha ? 1 : 0); });
-      html += '<div style="padding:2px 0 10px 32px;">';
-      ordenMovs.forEach(function(m){
-        var monedaGasto = m.moneda || f.moneda;
-        html += '<div style="display:flex;align-items:baseline;gap:8px;padding:5px 0;">' +
-          '<span style="width:6px;height:6px;border-radius:50%;background:' + (CAT_COLOR[m.categoria]||"#8A8270") + ';flex-shrink:0;margin-bottom:2px;"></span>' +
-          '<span style="flex:1;min-width:0;font-size:13px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(m.desc) + '<span style="color:var(--muted);"> \u00b7 ' + fmtFecha(m.fecha) + '</span></span>' +
-          '<span class="mono" style="font-size:12.5px;color:var(--rust);white-space:nowrap;">\u2212' + fmtMoney(m.monto, monedaGasto) + '</span>' +
-        '</div>';
-      });
-      html += '</div>';
-    }
-    html += '</div>';
-  });
   html += '</div>';
   return html;
 }
@@ -703,8 +835,10 @@ function renderModal(){
   if(state.modal === "gastosDetectados") return modalShell("Gastos detectados", formGastosDetectados());
   if(state.modal === "nuevoFondo") return modalShell("Nuevo fondo", formNuevoFondo());
   if(state.modal === "nuevoMov") return modalShell("Anotar gasto", formNuevoMov());
+  if(state.modal === "editarMov") return modalShell("Editar gasto", formEditarMov());
   if(state.modal === "ajustes") return modalShell("Respaldo", formAjustes());
   if(state.modal === "confirmDelete") return confirmShell("¿Eliminar este fondo y todos sus movimientos? Esto no se puede deshacer.", "delete-fondo", "Eliminar");
+  if(state.modal === "confirmFinalizar") return confirmShell("Vas a marcar este proyecto como finalizado aunque le quede saldo. Pasará a Historial, pero puedes reabrirlo cuando quieras.", "finalizar-proyecto", "Finalizar");
   if(state.modal === "confirmImport") return confirmShell("Vas a reemplazar todos los fondos actuales (" + state.fondos.length + ") con los " + state.importPayload.length + " del archivo " + state.importFormato + ". Esto no se puede deshacer.", "confirm-import", "Reemplazar");
   return "";
 }
@@ -1022,6 +1156,32 @@ function formNuevoMov(){
   return html;
 }
 
+function formEditarMov(){
+  var f = state.fondos.find(function(x){ return x.id === state.openFondoId; });
+  var m = f ? f.movimientos.find(function(x){ return x.id === state.editandoMovId; }) : null;
+  if(!f || !m) return '<div style="font-size:13.5px;color:var(--muted);">No se encontró este gasto.</div>';
+  mem.categoriaSel = m.categoria || "Otros";
+  var monedaFondo = f.moneda;
+  var monedaGastoActual = m.moneda || monedaFondo;
+  var otraMoneda = monedaFondo === "USD" ? "C$" : "USD";
+  var distinta = monedaGastoActual !== monedaFondo;
+  var html = "";
+  html += field('¿En qué se gastó?', '<input id="m-desc" style="' + inputStyle + '" value="' + esc(m.desc) + '">');
+  html += '<div style="display:flex;gap:10px;">';
+  html += field('Monto', '<input id="m-monto" type="number" inputmode="decimal" style="' + inputStyle + '" value="' + m.monto + '">');
+  html += '<div style="width:100px;">' + field('Moneda', '<select id="m-moneda" style="' + inputStyle + '"><option value="' + monedaFondo + '"' + (!distinta?" selected":"") + '>' + (monedaFondo==="USD"?"US$":"C$") + '</option><option value="' + otraMoneda + '"' + (distinta?" selected":"") + '>' + (otraMoneda==="USD"?"US$":"C$") + '</option></select>') + '</div>';
+  html += '</div>';
+  html += '<div id="m-tipocambio-wrap" style="display:' + (distinta?"block":"none") + ';">' + field('Tipo de cambio (1 US$ = ? C$)', '<input id="m-tipocambio" type="number" inputmode="decimal" style="' + inputStyle + '" value="' + (m.tipoCambio || "") + '" placeholder="Ej: 36.85">') + '</div>';
+  html += field('Fecha', '<input id="m-fecha" type="date" style="' + inputStyle + '" value="' + m.fecha + '">');
+  html += field('Categoría', '<div id="m-categorias" style="display:flex;flex-wrap:wrap;gap:6px;">' + CATEGORIAS.map(function(c){
+    var active = c === mem.categoriaSel;
+    return '<button type="button" data-cat="' + c + '" class="chip cat-chip" style="border:1px solid ' + (active?(CAT_COLOR[c]):"var(--line)") + ';background:' + (active?(CAT_COLOR[c]+"22"):"transparent") + ';color:' + (active?"var(--ink)":"var(--muted)") + ';border-radius:20px;padding:6px 12px;font-size:12.5px;">' + c + '</button>';
+  }).join("") + '</div>');
+  html += '<button data-action="save-editar-mov" class="press" style="width:100%;background:var(--forest);color:var(--cream);border:none;border-radius:8px;padding:13px 0;font-size:15.5px;font-weight:600;margin-top:6px;">Guardar cambios</button>';
+  html += '<button data-action="delete-mov-desde-editar" data-fondo="' + f.id + '" data-mov="' + m.id + '" class="press" style="width:100%;background:none;border:none;color:var(--rust);font-size:13px;padding:12px 0 0;">Eliminar este gasto</button>';
+  return html;
+}
+
 function formAjustes(){
   var n = state.fondos.length;
   var html = '<div style="font-size:13.5px;color:var(--muted);margin-bottom:6px;line-height:1.5;">Tienes ' + n + ' fondo' + (n===1?"":"s") + ' guardados. Puedes descargar una copia o recuperar una que ya tengas.</div>';
@@ -1146,6 +1306,22 @@ function afterRender(fondoAbierto){
     fPctInput.addEventListener("input", actualizarPreview);
     fMonedaSel.addEventListener("change", actualizarPreview);
   }
+  var histAnioSel = document.getElementById("hist-anio-sel");
+  if(histAnioSel){
+    histAnioSel.addEventListener("change", function(){ state.historialAnio = parseInt(histAnioSel.value,10); render(); });
+  }
+  var histDiaInput = document.getElementById("hist-dia-input");
+  if(histDiaInput){
+    histDiaInput.addEventListener("change", function(){ state.historialDia = histDiaInput.value || todayISO(); render(); });
+  }
+  var histOrdenSel = document.getElementById("hist-orden-sel");
+  if(histOrdenSel){
+    histOrdenSel.addEventListener("change", function(){ state.historialOrden = histOrdenSel.value; render(); });
+  }
+  var repOrdenSel = document.getElementById("rep-orden-sel");
+  if(repOrdenSel){
+    repOrdenSel.addEventListener("change", function(){ state.reportesOrden = repOrdenSel.value; render(); });
+  }
   var fileInput = document.getElementById("import-file-input");
   if(fileInput){
     fileInput.addEventListener("change", function(e){
@@ -1187,6 +1363,12 @@ function bindOnce(){
       case "open-ajustes": state.modal = "ajustes"; render(); break;
       case "open-nuevo-fondo": state.modal = "nuevoFondo"; render(); break;
       case "open-nuevo-mov": state.modal = "nuevoMov"; render(); break;
+      case "edit-mov": {
+        state.editandoMovId = el.getAttribute("data-mov");
+        state.modal = "editarMov";
+        render();
+        break;
+      }
       case "mov-foto": {
         var fotoInput = document.getElementById("mov-foto-input");
         if(fotoInput) fotoInput.click();
@@ -1197,6 +1379,14 @@ function bindOnce(){
       case "cerrar-fondo-detalle": state.openFondoId = null; render(); break;
       case "set-tab": state.tab = el.getAttribute("data-tab"); render(); break;
       case "delete-mov": deleteMovimiento(el.getAttribute("data-fondo"), el.getAttribute("data-mov")); break;
+      case "delete-mov-desde-editar": {
+        deleteMovimiento(el.getAttribute("data-fondo"), el.getAttribute("data-mov"));
+        state.modal = null; state.editandoMovId = null; render();
+        break;
+      }
+      case "confirm-finalizar": state.confirmFinalizarId = el.getAttribute("data-id"); state.modal = "confirmFinalizar"; render(); break;
+      case "finalizar-proyecto": finalizarProyecto(state.confirmFinalizarId); break;
+      case "reabrir-proyecto": reabrirProyecto(el.getAttribute("data-id")); break;
       case "confirm-delete-fondo": state.confirmDeleteId = el.getAttribute("data-id"); state.modal = "confirmDelete"; render(); break;
       case "delete-fondo": deleteFondo(state.confirmDeleteId); break;
       case "mes-prev": {
@@ -1208,6 +1398,30 @@ function bindOnce(){
         var nm2 = state.reportMes + 1, na2 = state.reportAnio;
         if(nm2 > 11){ nm2 = 0; na2 += 1; }
         state.reportMes = nm2; state.reportAnio = na2; render(); break;
+      }
+      case "hist-periodo": {
+        var per = el.getAttribute("data-periodo");
+        state.historialPeriodo = per;
+        if(per === "anio"){
+          state.historialAnio = aniosDisponiblesHistorial()[0];
+        } else if(per === "mes" || per === "dia"){
+          var f = fechaMasRecienteHistorial();
+          state.historialAnio = parseInt(f.slice(0,4),10);
+          state.historialMes = parseInt(f.slice(5,7),10) - 1;
+          state.historialDia = f;
+        }
+        render();
+        break;
+      }
+      case "hist-mes-prev": {
+        var hnm = state.historialMes - 1, hna = state.historialAnio;
+        if(hnm < 0){ hnm = 11; hna -= 1; }
+        state.historialMes = hnm; state.historialAnio = hna; render(); break;
+      }
+      case "hist-mes-next": {
+        var hnm2 = state.historialMes + 1, hna2 = state.historialAnio;
+        if(hnm2 > 11){ hnm2 = 0; hna2 += 1; }
+        state.historialMes = hnm2; state.historialAnio = hna2; render(); break;
       }
       case "export-json": exportarJSON(); break;
       case "export-csv": exportarCSV(); break;
@@ -1263,6 +1477,26 @@ function bindOnce(){
           montoConvertido = Math.round(montoConvertido * 100) / 100;
         }
         addMovimiento(state.openFondoId, desc, monto2, monedaGasto, tipoCambio, montoConvertido, mem.categoriaSel, fecha2);
+        break;
+      }
+      case "save-editar-mov": {
+        var fondoE = state.fondos.find(function(x){ return x.id === state.openFondoId; });
+        var descE = (document.getElementById("m-desc").value || "").trim();
+        var montoE = parseFloat(document.getElementById("m-monto").value);
+        var monedaGastoE = document.getElementById("m-moneda").value;
+        var fechaE = document.getElementById("m-fecha").value || todayISO();
+        if(!descE || !(montoE > 0)){ showToast("Falta la descripción o el monto"); return; }
+        var tipoCambioE = null, montoConvertidoE = montoE;
+        if(fondoE && monedaGastoE !== fondoE.moneda){
+          var tcInputE = document.getElementById("m-tipocambio");
+          var tcValE = tcInputE ? parseFloat(tcInputE.value) : NaN;
+          if(!(tcValE > 0)){ showToast("Falta el tipo de cambio"); return; }
+          tipoCambioE = tcValE;
+          if(fondoE.moneda === "USD" && monedaGastoE === "C$"){ montoConvertidoE = montoE / tcValE; }
+          else if(fondoE.moneda === "C$" && monedaGastoE === "USD"){ montoConvertidoE = montoE * tcValE; }
+          montoConvertidoE = Math.round(montoConvertidoE * 100) / 100;
+        }
+        editarMovimiento(state.openFondoId, state.editandoMovId, descE, montoE, monedaGastoE, tipoCambioE, montoConvertidoE, mem.categoriaSel, fechaE);
         break;
       }
     }
